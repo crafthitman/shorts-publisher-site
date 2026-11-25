@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard - Shorts Publisher</title>
+<script src="config.js"></script>
+<style>
+:root{--bg:#f7f5f0;--fg:#1f1b18;--muted:#5d5650;--card:#fff;--line:#e4ded5;--acc:#c2622d;--ok:#2f7d4a;--bad:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#161412;--fg:#f1ece6;--muted:#b3aaa1;--card:#1f1c19;--line:#34302b;--acc:#e8894f;--ok:#6cc58c;--bad:#f08b84}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:900px;margin:0 auto;padding:32px 16px 64px}
+nav{display:flex;gap:18px;flex-wrap:wrap;font-size:15px;margin-bottom:24px}nav a{color:var(--muted);text-decoration:none}
+h1{font-size:28px;margin:0 0 4px}h2{font-size:20px;margin:28px 0 10px}.muted{color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:12px 0}
+.row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.acct{display:flex;align-items:center;gap:12px;flex:1 1 260px}.acct img{width:48px;height:48px;border-radius:50%;object-fit:cover;border:1px solid var(--line)}
+button{font:inherit;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff}button:disabled{opacity:.5;cursor:not-allowed}
+input,select,textarea{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);width:100%}
+textarea{min-height:84px}label{display:block;margin:10px 0 4px;font-weight:600;font-size:14px}
+.check{display:flex;gap:8px;align-items:center;font-weight:400;margin:6px 0}.check input{width:auto}
+video{width:200px;max-width:100%;border-radius:10px;background:#000;aspect-ratio:9/16}
+.item{display:flex;gap:16px;flex-wrap:wrap}.item .form{flex:1 1 320px;min-width:0}
+.pill{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line)}
+.pill.posted{color:var(--ok);border-color:var(--ok)}.pill.failed{color:var(--bad);border-color:var(--bad)}
+.err{color:var(--bad)}.okc{color:var(--ok)}.small{font-size:13px}
+</style>
+</head>
+<body><main>
+<nav><a href="./">Home</a><a href="app.html">Dashboard</a><a href="privacy.html">Privacy Policy</a><a href="terms.html">Terms of Service</a></nav>
+<h1>Shorts Publisher dashboard</h1>
+<p class="muted">Connect your TikTok accounts, review each video, choose its settings and post it.</p>
+
+<div class="card" id="loginCard">
+  <label for="key">Owner password</label>
+  <div class="row"><input id="key" type="password" style="flex:1 1 220px" autocomplete="current-password"><button class="primary" id="unlock">Open dashboard</button></div>
+  <p class="small muted">Only the owner of these accounts can use this dashboard.</p>
+  <p class="err" id="loginErr"></p>
+</div>
+
+<div id="dash" hidden>
+  <h2>1. Your TikTok accounts</h2>
+  <div class="row" id="accounts"></div>
+
+  <h2>2. Add a video to the queue</h2>
+  <div class="card">
+    <div class="row">
+      <div style="flex:1 1 200px"><label for="nAcct">Account</label><select id="nAcct"><option value="history">History Unhinged</option><option value="deen">Memories of Deen</option></select></div>
+      <div style="flex:1 1 200px"><label for="nSlot">Scheduled time (optional)</label><input id="nSlot" type="datetime-local"></div>
+    </div>
+    <label for="nCap">Caption</label><textarea id="nCap" maxlength="2200"></textarea>
+    <label for="nFile">Video file (mp4)</label><input id="nFile" type="file" accept="video/mp4,video/quicktime">
+    <p><button class="primary" id="add">Add to queue</button> <span id="addMsg" class="small"></span></p>
+  </div>
+
+  <h2>3. Review and post</h2>
+  <div id="items"></div>
+</div>
+<footer class="small muted" style="margin-top:40px">Shorts Publisher &middot; <a href="mailto:crafthitman@gmail.com">crafthitman@gmail.com</a></footer>
+
+<script>
+const API = (window.SP_API || '').replace(/\/$/, '');
+const NAMES = { history: 'History Unhinged', deen: 'Memories of Deen' };
+const PRIV = { PUBLIC_TO_EVERYONE: 'Everyone', MUTUAL_FOLLOW_FRIENDS: 'Friends', FOLLOWER_OF_CREATOR: 'Followers', SELF_ONLY: 'Only me' };
+let KEY = sessionStorage.getItem('sp_key') || '';
+let CREATORS = {};
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function api(path, opts = {}) {
+  const r = await fetch(API + path, { ...opts, headers: { 'X-Admin-Key': KEY, ...(opts.json ? { 'Content-Type': 'application/json' } : {}), ...(opts.headers || {}) },
+    body: opts.json ? JSON.stringify(opts.json) : opts.body });
+  if (opts.raw) return r;
+  const d = await r.json().catch(() => ({ ok: false, error: 'HTTP ' + r.status }));
+  if (!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status));
+  return d;
+}
+
+$('unlock').onclick = async () => {
+  KEY = $('key').value.trim(); $('loginErr').textContent = '';
+  try { await load(); sessionStorage.setItem('sp_key', KEY); }
+  catch (e) { $('loginErr').textContent = e.message; }
+};
+
+async function load() {
+  const a = await api('/api/accounts');
+  $('loginCard').hidden = true; $('dash').hidden = false;
+  CREATORS = {};
+  $('accounts').innerHTML = Object.entries(a.accounts).map(([k, v]) => {
+    if (v.creator) CREATORS[k] = v.creator;
+    const c = v.creator;
+    const who = c ? `<img src="${esc(c.creator_avatar_url)}" alt=""><div><b>${esc(c.creator_nickname)}</b><div class="small muted">@${esc(c.creator_username)} &middot; ${NAMES[k]}</div></div>`
+                  : `<div><b>${NAMES[k]}</b><div class="small muted">${v.connected ? esc(v.error || 'connected') : 'Not connected'}</div></div>`;
+    const btn = v.connected ? `<button data-dis="${k}">Disconnect</button>` : `<button class="primary" data-con="${k}">Connect with TikTok</button>`;
+    return `<div class="card acct" style="margin:0">${who}<span style="flex:1"></span>${btn}</div>`;
+  }).join('');
+  document.querySelectorAll('[data-con]').forEach(b => b.onclick = async () => {
+    const d = await api('/api/auth/start', { method: 'POST', json: { account: b.dataset.con } });
+    location.href = d.url;
+  });
+  document.querySelectorAll('[data-dis]').forEach(b => b.onclick = async () => {
+    if (!confirm('Disconnect this TikTok account from Shorts Publisher?')) return;
+    await api('/api/accounts/' + b.dataset.dis, { method: 'DELETE' }); load();
+  });
+  await loadItems();
+}
+
+$('add').onclick = async () => {
+  const f = $('nFile').files[0]; $('addMsg').textContent = '';
+  if (!f) { $('addMsg').textContent = 'Choose a video file.'; return; }
+  try {
+    $('addMsg').textContent = 'Uploading...';
+    const slot = $('nSlot').value ? new Date($('nSlot').value).toISOString() : null;
+    const d = await api('/api/items', { method: 'POST', json: { account: $('nAcct').value, caption: $('nCap').value, slot } });
+    await api('/api/items/' + d.item.id + '/video', { method: 'PUT', body: f, headers: { 'Content-Type': 'video/mp4' } });
+    $('addMsg').textContent = 'Added.'; $('nCap').value = ''; $('nFile').value = '';
+    loadItems();
+  } catch (e) { $('addMsg').textContent = e.message; }
+};
+
+async function loadItems() {
+  const { items } = await api('/api/items');
+  if (!items.length) { $('items').innerHTML = '<p class="muted">No videos in the queue.</p>'; return; }
+  $('items').innerHTML = items.map(itemHtml).join('');
+  for (const it of items) wireItem(it);
+}
+
+function itemHtml(it) {
+  const c = CREATORS[it.account];
+  const s = it.settings || {};
+  const opts = (c && c.privacy_level_options || []).map(o => `<option value="${o}" ${s.privacy_level === o ? 'selected' : ''}>${PRIV[o] || o}</option>`).join('');
+  const done = ['posting', 'posted'].includes(it.status);
+  const dis = done ? 'disabled' : '';
+  return `<div class="card item" id="it-${it.id}">
+    <video id="v-${it.id}" controls playsinline></video>
+    <div class="form">
+      <div class="small">${c ? `Posting to <b>${esc(c.creator_nickname)}</b> (@${esc(c.creator_username)})` : `<span class="err">${NAMES[it.account]} is not connected</span>`}
+        ${it.slot ? ' &middot; scheduled ' + new Date(it.slot).toLocaleString() : ''} &middot; <span class="pill ${it.status}">${it.status}</span></div>
+      <p class="small err" id="dur-${it.id}"></p>
+      <label>Caption</label><textarea id="cap-${it.id}" maxlength="2200" ${dis}>${esc(it.caption)}</textarea>
+      <label>Who can view this video</label>
+      <select id="priv-${it.id}" ${dis}><option value="" ${s.privacy_level ? '' : 'selected'} disabled>Select who can view</option>${opts}</select>
+      <label>Allow users to</label>
+      <div class="check"><input type="checkbox" id="com-${it.id}" ${c && c.comment_disabled ? 'disabled' : ''} ${s.privacy_level && !s.disable_comment ? 'checked' : ''} ${dis}> Comment</div>
+      <div class="check"><input type="checkbox" id="duet-${it.id}" ${c && c.duet_disabled ? 'disabled' : ''} ${s.privacy_level && !s.disable_duet ? 'checked' : ''} ${dis}> Duet</div>
+      <div class="check"><input type="checkbox" id="sti-${it.id}" ${c && c.stitch_disabled ? 'disabled' : ''} ${s.privacy_level && !s.disable_stitch ? 'checked' : ''} ${dis}> Stitch</div>
+      <label>Content disclosure</label>
+      <div class="check"><input type="checkbox" id="aigc-${it.id}" ${s.is_aigc ? 'checked' : ''} ${dis}> AI-generated content (label the video as AI-generated)</div>
+      <div class="check"><input type="checkbox" id="cc-${it.id}" ${s.brand_content_toggle || s.brand_organic_toggle ? 'checked' : ''} ${dis}> This video promotes a brand, product or service</div>
+      <div id="ccbox-${it.id}" style="margin-left:24px" ${s.brand_content_toggle || s.brand_organic_toggle ? '' : 'hidden'}>
+        <div class="check"><input type="checkbox" id="own-${it.id}" ${s.brand_organic_toggle ? 'checked' : ''} ${dis}> Your brand <span class="small muted">(labeled "Promotional content")</span></div>
+        <div class="check"><input type="checkbox" id="paid-${it.id}" ${s.brand_content_toggle ? 'checked' : ''} ${dis}> Branded content <span class="small muted">(labeled "Paid partnership")</span></div>
+      </div>
+      <p class="small muted" id="consent-${it.id}">By posting, you agree to TikTok's <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener">Music Usage Confirmation</a>.</p>
+      <p><button id="ap-${it.id}" ${dis}>Approve for scheduled time</button> <button class="primary" id="post-${it.id}" ${dis}>Post now</button> <button id="del-${it.id}">Remove</button></p>
+      <p class="small" id="msg-${it.id}">${it.error ? '<span class="err">' + esc(it.error) + '</span>' : (it.status === 'posting' ? 'Uploaded. TikTok is processing it; it can take a few minutes to appear on your profile.' : (it.status === 'posted' ? '<span class="okc">Published on TikTok.</span>' : ''))}</p>
+    </div></div>`;
+}
+
+function settingsOf(it) {
+  const g = id => $(id + '-' + it.id);
+  const cc = g('cc').checked;
+  return { caption: g('cap').value, privacy_level: g('priv').value, disable_comment: !g('com').checked, disable_duet: !g('duet').checked,
+    disable_stitch: !g('sti').checked, is_aigc: g('aigc').checked, brand_organic_toggle: cc && g('own').checked, brand_content_toggle: cc && g('paid').checked };
+}
+
+function check(it) {
+  const s = settingsOf(it), msg = $('msg-' + it.id);
+  if (!s.privacy_level) { msg.innerHTML = '<span class="err">Choose who can view this video.</span>'; return null; }
+  if ($('cc-' + it.id).checked && !s.brand_organic_toggle && !s.brand_content_toggle) { msg.innerHTML = '<span class="err">Choose "Your brand" and/or "Branded content", or turn off the disclosure.</span>'; return null; }
+  if (s.brand_content_toggle && s.privacy_level === 'SELF_ONLY') { msg.innerHTML = '<span class="err">Branded content can\'t be private.</span>'; return null; }
+  if ($('dur-' + it.id).dataset.tooLong) { msg.innerHTML = '<span class="err">This video is longer than this account can post.</span>'; return null; }
+  return s;
+}
+
+function wireItem(it) {
+  const g = id => $(id + '-' + it.id);
+  api('/api/items/' + it.id + '/video', { raw: true }).then(r => r.ok ? r.blob() : null).then(b => {
+    if (!b) return; const v = $('v-' + it.id); v.src = URL.createObjectURL(b);
+    v.onloadedmetadata = () => { const c = CREATORS[it.account];
+      if (c && c.max_video_post_duration_sec && v.duration > c.max_video_post_duration_sec) {
+        g('dur').textContent = `This video is ${Math.round(v.duration)} s; this account can post up to ${c.max_video_post_duration_sec} s.`; g('dur').dataset.tooLong = 1; } };
+  });
+  const upd = () => {
+    g('ccbox').hidden = !g('cc').checked;
+    const paid = g('cc').checked && g('paid').checked;
+    const self = g('priv').querySelector('option[value="SELF_ONLY"]');
+    if (self) { self.disabled = paid; if (paid && g('priv').value === 'SELF_ONLY') g('priv').value = ''; }
+    g('consent').innerHTML = paid
+      ? 'By posting, you agree to TikTok\'s <a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank" rel="noopener">Branded Content Policy</a> and <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener">Music Usage Confirmation</a>.'
+      : 'By posting, you agree to TikTok\'s <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener">Music Usage Confirmation</a>.';
+  };
+  ['cc', 'paid', 'own', 'priv'].forEach(k => g(k).addEventListener('change', upd)); upd();
+  g('ap').onclick = async () => { const s = check(it); if (!s) return;
+    try { await api('/api/items/' + it.id + '/approve', { method: 'POST', json: s }); g('msg').innerHTML = '<span class="okc">Approved. It will be posted at its scheduled time.</span>'; }
+    catch (e) { g('msg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; } };
+  g('post').onclick = async () => { const s = check(it); if (!s) return;
+    g('post').disabled = true; g('msg').textContent = 'Posting to TikTok...';
+    try { await api('/api/items/' + it.id + '/approve', { method: 'POST', json: s });
+      const d = await api('/api/items/' + it.id + '/post', { method: 'POST' });
+      g('msg').textContent = 'Uploaded. TikTok is processing it; it can take a few minutes to appear on your profile.';
+      poll(it.id, 0);
+    } catch (e) { g('msg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; g('post').disabled = false; } };
+  g('del').onclick = async () => { if (!confirm('Remove this video from the queue?')) return; await api('/api/items/' + it.id, { method: 'DELETE' }); loadItems(); };
+  if (it.status === 'posting') poll(it.id, 0);
+}
+
+async function poll(id, n) {
+  if (n > 20) return;
+  try { const { item } = await api('/api/items/' + id + '/status');
+    if (item.status === 'posting') return setTimeout(() => poll(id, n + 1), 5000);
+    loadItems();
+  } catch (e) { setTimeout(() => poll(id, n + 1), 8000); }
+}
+
+if (!API) { $('loginErr').textContent = 'The dashboard is not configured yet (missing API address).'; }
+else if (KEY) { $('key').value = KEY; load().catch(() => { sessionStorage.removeItem('sp_key'); KEY = ''; }); }
+</script>
+</main></body></html>

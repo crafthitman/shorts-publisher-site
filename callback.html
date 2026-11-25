@@ -1,34 +1,52 @@
-<!doctype html><html lang="en"><head><title>Connected - Shorts Publisher</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connecting - Shorts Publisher</title>
+<script src="config.js"></script>
 <style>
-:root{--bg:#f7f5f0;--fg:#1f1b18;--muted:#5d5650;--card:#fff;--line:#e4ded5;--acc:#c2622d}
-@media (prefers-color-scheme:dark){:root{--bg:#161412;--fg:#f1ece6;--muted:#b3aaa1;--card:#1f1c19;--line:#34302b;--acc:#e8894f}}
+:root{--bg:#f7f5f0;--fg:#1f1b18;--muted:#5d5650;--card:#fff;--line:#e4ded5;--acc:#c2622d;--bad:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#161412;--fg:#f1ece6;--muted:#b3aaa1;--card:#1f1c19;--line:#34302b;--acc:#e8894f;--bad:#f08b84}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-main{max-width:760px;margin:0 auto;padding:40px 16px 64px}
-nav{display:flex;gap:18px;flex-wrap:wrap;font-size:15px;margin-bottom:32px}nav a{color:var(--muted);text-decoration:none}nav a:hover{color:var(--acc)}
-h1{font-size:32px;line-height:1.2;margin:0 0 8px}h2{font-size:20px;margin:32px 0 8px}p,li{color:var(--fg)}.muted{color:var(--muted)}
+main{max-width:640px;margin:0 auto;padding:48px 16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin:20px 0}
-a{color:var(--acc)}code{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:2px 6px;word-break:break-all}
-footer{margin-top:48px;font-size:14px;color:var(--muted)}
-</style></head><body><main><nav><a href="./">Home</a><a href="privacy.html">Privacy Policy</a><a href="terms.html">Terms of Service</a></nav>
-<h1 id="t">Connecting your account&hellip;</h1>
-<div class="card" id="box"><p class="muted">Reading the response from TikTok&hellip;</p></div>
+.acct{display:flex;align-items:center;gap:12px}.acct img{width:56px;height:56px;border-radius:50%;object-fit:cover}
+a.btn{display:inline-block;margin-top:12px;padding:8px 14px;border-radius:8px;background:var(--acc);color:#fff;text-decoration:none}
+.muted{color:var(--muted)}.err{color:var(--bad)}
+</style>
+</head>
+<body><main>
+<h1 id="t">Connecting your TikTok account&hellip;</h1>
+<div class="card" id="box"><p class="muted">Finishing the connection with TikTok&hellip;</p></div>
 <script>
-(function(){
-  var q = new URLSearchParams(location.search), box = document.getElementById('box'), t = document.getElementById('t');
-  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+(async function () {
+  const q = new URLSearchParams(location.search), box = document.getElementById('box'), t = document.getElementById('t');
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const back = '<a class="btn" href="app.html">Back to the dashboard</a>';
   if (q.get('error')) {
     t.textContent = 'Connection was not completed';
-    box.innerHTML = '<p>TikTok returned: <code>' + esc(q.get('error')) + '</code></p><p class="muted">' + esc(q.get('error_description') || '') + '</p>';
-  } else if (q.get('code')) {
-    t.textContent = 'Almost done';
-    box.innerHTML = '<p>Your account approved the connection. Copy this one-time code and paste it where the setup asks for it. It expires in a few minutes and can be used only once.</p>'
-      + '<p><code id="c">' + esc(q.get('code')) + '</code></p><p><button id="b">Copy code</button></p>'
-      + (q.get('state') ? '<p class="muted">Account: ' + esc(q.get('state')) + '</p>' : '');
-    document.getElementById('b').onclick = function(){ navigator.clipboard.writeText(q.get('code')); this.textContent = 'Copied'; };
-  } else {
+    box.innerHTML = '<p>TikTok returned: <b>' + esc(q.get('error')) + '</b></p><p class="muted">' + esc(q.get('error_description') || '') + '</p>' + back;
+    return;
+  }
+  if (!q.get('code')) {
     t.textContent = 'Shorts Publisher login page';
-    box.innerHTML = '<p>This page receives the response when the owner connects a TikTok account to Shorts Publisher. There is nothing to do here directly.</p>';
+    box.innerHTML = '<p>This page finishes the connection when the owner connects a TikTok account from the dashboard.</p>' + back;
+    return;
+  }
+  try {
+    const r = await fetch((window.SP_API || '').replace(/\/$/, '') + '/api/auth/exchange', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: q.get('code'), state: q.get('state') }) });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'connection failed');
+    history.replaceState(null, '', location.pathname);  // remove the one-time code from the address bar
+    const c = d.creator;
+    t.textContent = 'TikTok account connected';
+    box.innerHTML = (c ? '<div class="acct"><img src="' + esc(c.creator_avatar_url) + '" alt=""><div><b>' + esc(c.creator_nickname) + '</b><div class="muted">@' + esc(c.creator_username) + '</div></div></div>' : '<p>Connected.</p>')
+      + '<p class="muted">Shorts Publisher can now post the videos you approve to this account.</p>' + back;
+  } catch (e) {
+    t.textContent = 'Connection was not completed';
+    box.innerHTML = '<p class="err">' + esc(e.message) + '</p>' + back;
   }
 })();
 </script>
-<footer>Shorts Publisher &middot; Contact: <a href="mailto:crafthitman@gmail.com">crafthitman@gmail.com</a></footer></main></body></html>
+</main></body></html>
