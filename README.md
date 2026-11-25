@@ -1,2 +1,3 @@
-# shorts-publisher-site
-Website, privacy policy and terms for the Shorts Publisher app
+# Shorts Publisher site
+
+Public homepage, privacy policy and terms of service for the Shorts Publisher app (GitHub Pages).
