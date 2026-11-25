@@ -72,7 +72,7 @@ async function api(path, opts = {}) {
     body: opts.json ? JSON.stringify(opts.json) : opts.body });
   if (opts.raw) return r;
   const d = await r.json().catch(() => ({ ok: false, error: 'HTTP ' + r.status }));
-  if (!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status));
+  if (!r.ok || d.ok === false) throw new Error(d.error || (d.item && d.item.error) || ('HTTP ' + r.status));
   return d;
 }
 
